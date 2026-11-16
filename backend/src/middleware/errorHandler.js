@@ -1,60 +1,64 @@
 import { config } from '../config/env.js';
 
 export const errorHandler = (err, req, res, next) => {
-  let error = { ...err };
-  error.message = err.message;
+  let statusCode = err.statusCode || 500;
+  let message = err.message || 'An internal server error occurred.';
 
+  // Log error in server console
   console.error(`[Error] ${req.method} ${req.originalUrl}:`, err);
 
   // Mongoose Bad ObjectId (CastError)
   if (err.name === 'CastError') {
-    const message = `Resource not found with id of ${err.value}`;
-    return res.status(404).json({
-      success: false,
-      message
-    });
+    statusCode = 404;
+    message = 'Requested resource not found.';
   }
 
   // Mongoose Duplicate Key (11000)
   if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
-    const message = `An account or record with this ${field} already exists.`;
-    return res.status(400).json({
-      success: false,
-      message,
-      field
-    });
+    statusCode = 400;
+    const field = Object.keys(err.keyValue || {})[0] || 'field';
+    message = `An entry with this ${field} already exists.`;
   }
 
   // Mongoose Validation Error
   if (err.name === 'ValidationError') {
-    const message = Object.values(err.errors).map(val => val.message).join(', ');
-    return res.status(400).json({
-      success: false,
-      message
-    });
+    statusCode = 400;
+    message = Object.values(err.errors || {})
+      .map((val) => val.message)
+      .join(', ');
   }
 
   // JWT Errors
   if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid authorization token'
-    });
+    statusCode = 401;
+    message = 'Invalid authentication session.';
   }
 
   if (err.name === 'TokenExpiredError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Authorization token expired'
-    });
+    statusCode = 401;
+    message = 'Authentication session has expired. Please sign in again.';
   }
 
-  // Default to 500 server error
-  res.status(err.statusCode || 500).json({
+  // Security Violation in Sandbox Execution
+  if (err.message && err.message.startsWith('Security Violation')) {
+    statusCode = 400;
+    message = err.message;
+  }
+
+  // Rate Limiting Error
+  if (err.status === 429) {
+    statusCode = 429;
+    message = err.message || 'Too many requests. Please try again later.';
+  }
+
+  // Production sanitization: do not leak unhandled internal error specifics
+  if (config.nodeEnv === 'production' && statusCode === 500) {
+    message = 'An unexpected server error occurred. Please try again later.';
+  }
+
+  res.status(statusCode).json({
     success: false,
-    message: err.message || 'Server Internal Error',
+    message,
     ...(config.nodeEnv === 'development' && { stack: err.stack })
   });
 };
-

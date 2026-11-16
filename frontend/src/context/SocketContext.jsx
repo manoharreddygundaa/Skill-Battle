@@ -21,16 +21,16 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    // Connect to /battle namespace with authentication token
+    // Connect to /battle namespace with authentication token & credentials
     const newSocket = io(`${SOCKET_SERVER_URL}/battle`, {
       auth: { token },
+      withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 5,
       reconnectionDelay: 1000
     });
 
     newSocket.on('connect', () => {
-      console.log('[Socket] Connected to Battle Arena with ID:', newSocket.id);
       setIsConnected(true);
     });
 
@@ -40,7 +40,6 @@ export const SocketProvider = ({ children }) => {
     });
 
     newSocket.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected:', reason);
       setIsConnected(false);
     });
 
@@ -57,4 +56,3 @@ export const SocketProvider = ({ children }) => {
     </SocketContext.Provider>
   );
 };
-

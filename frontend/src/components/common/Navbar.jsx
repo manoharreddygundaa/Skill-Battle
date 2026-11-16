@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useToast } from '../../hooks/useToast';
 import {
   Swords,
   Flame,
@@ -16,12 +17,20 @@ import {
 
 export const Navbar = ({ onToggleSidebar }) => {
   const { user, isAuthenticated, logout, isAdmin } = useAuth();
+  const toast = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    setDropdownOpen(false);
+    try {
+      await logout();
+      toast.info('Signed out successfully. Session closed.');
+    } catch {
+      // Ignored
+    } finally {
+      navigate('/login');
+    }
   };
 
   return (

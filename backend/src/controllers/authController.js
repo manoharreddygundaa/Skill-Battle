@@ -1,12 +1,30 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 import { Badge } from '../models/Badge.js';
+import { TokenBlacklist } from '../models/TokenBlacklist.js';
 import { config } from '../config/env.js';
+import { extractToken } from '../middleware/auth.js';
+
+const getCookieOptions = () => ({
+  expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  httpOnly: true,
+  secure: config.nodeEnv === 'production',
+  sameSite: config.nodeEnv === 'production' ? 'none' : 'lax',
+  path: '/'
+});
 
 const generateToken = (id) => {
-  return jwt.sign({ id }, config.jwtSecret, {
-    expiresIn: config.jwtExpiresIn
-  });
+  return jwt.sign(
+    {
+      id,
+      jti: crypto.randomUUID() // Unique JWT ID to prevent collisions on rapid re-authentication
+    },
+    config.jwtSecret,
+    {
+      expiresIn: config.jwtExpiresIn
+    }
+  );
 };
 
 /**
@@ -18,8 +36,18 @@ export const register = async (req, res, next) => {
   try {
     const { name, username, email, password } = req.body;
 
+    if (!name || !username || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'All registration fields are required.'
+      });
+    }
+
+    const cleanUsername = String(username).toLowerCase().trim();
+    const cleanEmail = String(email).toLowerCase().trim();
+
     // Check existing email
-    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    const existingEmail = await User.findOne({ email: cleanEmail });
     if (existingEmail) {
       return res.status(400).json({
         success: false,
@@ -28,7 +56,7 @@ export const register = async (req, res, next) => {
     }
 
     // Check existing username
-    const existingUsername = await User.findOne({ username: username.toLowerCase() });
+    const existingUsername = await User.findOne({ username: cleanUsername });
     if (existingUsername) {
       return res.status(400).json({
         success: false,
@@ -36,11 +64,11 @@ export const register = async (req, res, next) => {
       });
     }
 
-    // Create user (default student role)
+    // Create user (student role is enforced)
     const user = await User.create({
-      name,
-      username: username.toLowerCase(),
-      email: email.toLowerCase(),
+      name: String(name).trim(),
+      username: cleanUsername,
+      email: cleanEmail,
       password,
       role: 'student'
     });
@@ -53,6 +81,9 @@ export const register = async (req, res, next) => {
     }
 
     const token = generateToken(user._id);
+
+    // Set HttpOnly Secure Cookie
+    res.cookie('token', token, getCookieOptions());
 
     res.status(201).json({
       success: true,
@@ -92,7 +123,9 @@ export const login = async (req, res, next) => {
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    const cleanEmail = String(email).toLowerCase().trim();
+    const user = await User.findOne({ email: cleanEmail }).select('+password');
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -116,6 +149,9 @@ export const login = async (req, res, next) => {
     }
 
     const token = generateToken(user._id);
+
+    // Set HttpOnly Secure Cookie
+    res.cookie('token', token, getCookieOptions());
 
     res.status(200).json({
       success: true,
@@ -141,6 +177,44 @@ export const login = async (req, res, next) => {
 };
 
 /**
+ * @route   POST /api/auth/logout
+ * @desc    Logout user & invalidate session token
+ * @access  Private
+ */
+export const logout = async (req, res, next) => {
+  try {
+    const token = req.token || extractToken(req);
+
+    if (token && req.user) {
+      // Invalidate token server-side via blacklist with automatic TTL expiry
+      await TokenBlacklist.create({
+        token,
+        userId: req.user._id,
+        expiresAt: req.tokenExp || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        reason: 'logout'
+      }).catch(() => {});
+    }
+
+    // Clear HttpOnly authentication cookie
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: config.nodeEnv === 'production',
+      sameSite: config.nodeEnv === 'production' ? 'none' : 'lax',
+      path: '/'
+    });
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully. Session invalidated.'
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * @route   GET /api/auth/me
  * @desc    Get current logged in user session
  * @access  Private
@@ -150,6 +224,13 @@ export const getMe = async (req, res, next) => {
     const user = await User.findById(req.user._id)
       .populate('badges.badge')
       .populate('solvedProblems.problem', 'title difficulty slug');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User session not found.'
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -185,9 +266,22 @@ export const updateProfile = async (req, res, next) => {
     const { name, bio, avatar } = req.body;
     const user = await User.findById(req.user._id);
 
-    if (name) user.name = name.trim();
-    if (bio !== undefined) user.bio = bio.trim();
-    if (avatar) user.avatar = avatar.trim();
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (name) user.name = String(name).trim().slice(0, 50);
+    if (bio !== undefined) user.bio = String(bio).trim().slice(0, 200);
+    if (avatar) {
+      // Validate avatar url or seed to prevent javascript: or malformed URI injection
+      const cleanAvatar = String(avatar).trim();
+      if (/^https?:\/\//i.test(cleanAvatar)) {
+        user.avatar = cleanAvatar;
+      }
+    }
 
     await user.save();
 
@@ -209,4 +303,3 @@ export const updateProfile = async (req, res, next) => {
     next(err);
   }
 };
-

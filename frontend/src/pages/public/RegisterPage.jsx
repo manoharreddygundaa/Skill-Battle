@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useToast } from '../../hooks/useToast';
 import { User, Mail, Lock, AtSign, UserPlus, AlertCircle } from 'lucide-react';
 
 export const RegisterPage = () => {
@@ -12,19 +13,30 @@ export const RegisterPage = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const { register } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isLoading) return; // Prevent concurrent registration attempts
     setError('');
 
-    if (!name || !username || !email || !password) {
+    const cleanName = name.trim();
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanName || !cleanUsername || !cleanEmail || !password) {
       setError('Please fill in all required fields.');
       return;
     }
 
-    if (username.length < 3) {
-      setError('Username must be at least 3 characters.');
+    if (cleanUsername.length < 3 || cleanUsername.length > 30) {
+      setError('Username must be between 3 and 30 characters.');
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
+      setError('Username can only contain letters, numbers, and underscores.');
       return;
     }
 
@@ -35,12 +47,15 @@ export const RegisterPage = () => {
 
     try {
       setIsLoading(true);
-      const res = await register(name, username.toLowerCase(), email, password);
+      const res = await register(cleanName, cleanUsername, cleanEmail, password);
       if (res.success) {
+        toast.success('Account created successfully! Welcome to Skill Battle.');
         navigate('/dashboard');
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      const msg = err.response?.data?.message || err.message || 'Registration failed. Please try again.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -84,7 +99,8 @@ export const RegisterPage = () => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Alex Morgan"
-              className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors"
+              disabled={isLoading}
+              className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
               required
             />
           </div>
@@ -99,7 +115,8 @@ export const RegisterPage = () => {
               value={username}
               onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
               placeholder="e.g. alex_coder"
-              className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors"
+              disabled={isLoading}
+              className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
               required
             />
           </div>
@@ -114,7 +131,8 @@ export const RegisterPage = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="alex@domain.com"
-              className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors"
+              disabled={isLoading}
+              className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
               required
             />
           </div>
@@ -129,7 +147,8 @@ export const RegisterPage = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="•••••••• (min 6 characters)"
-              className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors"
+              disabled={isLoading}
+              className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
               required
             />
           </div>
@@ -160,4 +179,3 @@ export const RegisterPage = () => {
     </div>
   );
 };
-

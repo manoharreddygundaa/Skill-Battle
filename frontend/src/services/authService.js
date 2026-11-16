@@ -11,6 +11,16 @@ export const authService = {
     return res.data;
   },
 
+  async logout() {
+    try {
+      const res = await api.post('/auth/logout');
+      return res.data;
+    } catch (err) {
+      // Even if network fails, client logout proceeds
+      return { success: true };
+    }
+  },
+
   async getMe() {
     const res = await api.get('/auth/me');
     return res.data;
@@ -21,4 +31,3 @@ export const authService = {
     return res.data;
   }
 };
-

@@ -3,6 +3,7 @@ import { Battle } from '../models/Battle.js';
 import { Problem } from '../models/Problem.js';
 import { User } from '../models/User.js';
 import { Submission } from '../models/Submission.js';
+import { TokenBlacklist } from '../models/TokenBlacklist.js';
 import { executeCode } from '../services/codeExecutionService.js';
 import { checkAndAwardBadges } from '../services/badgeService.js';
 import { config } from '../config/env.js';
@@ -31,26 +32,55 @@ const findBattleByCode = async (rawCode) => {
 };
 
 /**
+ * Helper to parse cookies from socket handshake headers
+ */
+const parseCookies = (cookieHeader) => {
+  const cookies = {};
+  if (!cookieHeader) return cookies;
+  cookieHeader.split(';').forEach(cookie => {
+    const parts = cookie.split('=');
+    if (parts.length >= 2) {
+      cookies[parts[0].trim()] = decodeURIComponent(parts.slice(1).join('=').trim());
+    }
+  });
+  return cookies;
+};
+
+/**
  * Socket.IO authentication middleware
  */
 export const socketAuthMiddleware = async (socket, next) => {
   try {
-    const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
+    const cookies = parseCookies(socket.handshake.headers?.cookie);
+    const token =
+      socket.handshake.auth?.token ||
+      cookies.token ||
+      (socket.handshake.headers?.authorization?.startsWith('Bearer ')
+        ? socket.handshake.headers.authorization.split(' ')[1]
+        : null);
+
     if (!token) {
       return next(new Error('Authentication token required'));
+    }
+
+    // Verify token is not revoked / blacklisted
+    const isBlacklisted = await TokenBlacklist.exists({ token });
+    if (isBlacklisted) {
+      return next(new Error('Session has been revoked'));
     }
 
     const decoded = jwt.verify(token, config.jwtSecret);
     const user = await User.findById(decoded.id).select('name username avatar rating role isSuspended');
 
     if (!user || user.isSuspended) {
-      return next(new Error('User not authorized'));
+      return next(new Error('User not authorized or suspended'));
     }
 
     socket.user = user;
+    socket.token = token;
     next();
   } catch (err) {
-    next(new Error('Invalid socket authentication'));
+    next(new Error('Invalid or expired socket authentication'));
   }
 };
 
@@ -264,15 +294,28 @@ export const setupBattleSocket = (io) => {
      */
     socket.on('battle:progress', async ({ roomCode, status, testCasesPassed, totalTestCases }) => {
       try {
+        if (!roomCode || typeof roomCode !== 'string') return;
         const normalizedCode = roomCode.toUpperCase().trim();
+
+        // Verify that this user is actually an active participant in this room
+        const battle = await findBattleByCode(normalizedCode);
+        if (!battle || battle.status !== 'in_progress') return;
+
+        const userIdStr = user._id.toString();
+        const isParticipant =
+          battle.creator.toString() === userIdStr ||
+          (battle.opponent && battle.opponent.toString() === userIdStr);
+
+        if (!isParticipant) return;
+
         const roomName = `room_${normalizedCode}`;
 
         socket.to(roomName).emit('battle:opponent_progress', {
           userId: user._id,
           username: user.username,
           status: status || 'coding',
-          testCasesPassed: testCasesPassed || 0,
-          totalTestCases: totalTestCases || 0
+          testCasesPassed: typeof testCasesPassed === 'number' ? testCasesPassed : 0,
+          totalTestCases: typeof totalTestCases === 'number' ? totalTestCases : 0
         });
       } catch (err) {
         console.error('[Socket battle:progress error]', err);
@@ -420,12 +463,30 @@ export const setupBattleSocket = (io) => {
      */
     socket.on('battle:rematch', async ({ roomCode }, callback) => {
       try {
+        if (!roomCode || typeof roomCode !== 'string') {
+          return callback?.({ success: false, message: 'Room code is required' });
+        }
         const normalizedCode = roomCode.toUpperCase().trim();
         const oldBattle = await Battle.findOne({ roomCode: normalizedCode });
-        if (!oldBattle) return;
+        if (!oldBattle) {
+          return callback?.({ success: false, message: 'Battle not found' });
+        }
+
+        // Verify requesting user was a participant in this battle
+        const userIdStr = user._id.toString();
+        const isParticipant =
+          oldBattle.creator.toString() === userIdStr ||
+          (oldBattle.opponent && oldBattle.opponent.toString() === userIdStr);
+
+        if (!isParticipant) {
+          return callback?.({ success: false, message: 'Only battle participants can initiate a rematch' });
+        }
 
         // Select a new random problem of same difficulty
         const problems = await Problem.find({ difficulty: oldBattle.difficulty, isActive: true });
+        if (!problems || problems.length === 0) {
+          return callback?.({ success: false, message: 'No problems available for rematch' });
+        }
         const randomProblem = problems[Math.floor(Math.random() * problems.length)];
 
         oldBattle.status = 'waiting';

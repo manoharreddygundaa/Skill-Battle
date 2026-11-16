@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { Mail, Lock, LogIn, AlertCircle, Sparkles, ShieldCheck, User } from 'lucide-react';
+import { useToast } from '../../hooks/useToast';
+import { Mail, Lock, LogIn, AlertCircle, ShieldCheck, User } from 'lucide-react';
 
 export const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -10,21 +11,34 @@ export const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const { login } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('expired') === 'true') {
+      setError('Your previous session expired or was terminated. Please log in again.');
+      toast.warning('Your session expired. Please sign in again.');
+    }
+  }, [location.search, toast]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isLoading) return; // Prevent race conditions
     setError('');
 
-    if (!email || !password) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
       setError('Please provide both email and password.');
       return;
     }
 
     try {
       setIsLoading(true);
-      const res = await login(email, password);
+      const res = await login(cleanEmail, password);
       if (res.success) {
+        toast.success(`Welcome back, ${res.user.name}!`);
         if (res.user.role === 'admin') {
           navigate('/admin');
         } else {
@@ -32,7 +46,9 @@ export const LoginPage = () => {
         }
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to sign in. Please check your credentials.');
+      const msg = err.response?.data?.message || err.message || 'Failed to sign in. Please verify your credentials.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -68,7 +84,8 @@ export const LoginPage = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@domain.com"
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-sm placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors"
+              disabled={isLoading}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-sm placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
               required
             />
           </div>
@@ -83,7 +100,8 @@ export const LoginPage = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-sm placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors"
+              disabled={isLoading}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0F1118] border border-[#232738] text-white text-sm placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
               required
             />
           </div>
@@ -140,4 +158,3 @@ export const LoginPage = () => {
     </div>
   );
 };
-

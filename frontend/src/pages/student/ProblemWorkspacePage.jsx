@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { problemService } from '../../services/problemService';
+import { useToast } from '../../hooks/useToast';
 import { CodeEditor } from '../../components/editor/CodeEditor';
 import { TestCasePanel } from '../../components/editor/TestCasePanel';
 import { SubmissionModal } from '../../components/editor/SubmissionModal';
@@ -22,6 +23,7 @@ import {
 export const ProblemWorkspacePage = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const toast = useToast();
 
   const [problem, setProblem] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -52,7 +54,9 @@ export const ProblemWorkspacePage = () => {
       }
     } catch (err) {
       console.error('Failed to load problem:', err);
-      setActionError(err.response?.data?.message || 'Could not load problem');
+      const msg = err.response?.data?.message || 'Could not load problem';
+      setActionError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -74,11 +78,13 @@ export const ProblemWorkspacePage = () => {
   const handleResetStarter = () => {
     if (problem?.starterCode?.[language]) {
       setCode(problem.starterCode[language]);
+      toast.info('Starter code reset.');
     }
   };
 
   // Run Code against sample test cases
   const handleRunCode = async () => {
+    if (isRunning) return;
     try {
       setIsRunning(true);
       setActionError('');
@@ -90,9 +96,16 @@ export const ProblemWorkspacePage = () => {
 
       if (res.success) {
         setRunResults(res.result);
+        if (res.result.passed) {
+          toast.success('Sample tests passed! Ready to submit.');
+        } else {
+          toast.warning(`${res.result.status}: Check testcase outputs.`);
+        }
       }
     } catch (err) {
-      setActionError(err.response?.data?.message || 'Failed to execute code');
+      const msg = err.response?.data?.message || 'Failed to execute code';
+      setActionError(msg);
+      toast.error(msg);
     } finally {
       setIsRunning(false);
     }
@@ -100,6 +113,7 @@ export const ProblemWorkspacePage = () => {
 
   // Submit Code against all test cases
   const handleSubmitCode = async () => {
+    if (isSubmitting) return;
     try {
       setIsSubmitting(true);
       setActionError('');
@@ -111,11 +125,18 @@ export const ProblemWorkspacePage = () => {
       if (res.success) {
         setSubmissionResult(res.submission);
         setIsModalOpen(true);
+        if (res.submission.status === 'Accepted') {
+          toast.success('Accepted! All test cases passed.');
+        } else {
+          toast.error(`Submission status: ${res.submission.status}`);
+        }
         // Refresh problem details to update solved status and history
         fetchProblem();
       }
     } catch (err) {
-      setActionError(err.response?.data?.message || 'Failed to submit code');
+      const msg = err.response?.data?.message || 'Failed to submit code';
+      setActionError(msg);
+      toast.error(msg);
     } finally {
       setIsSubmitting(false);
     }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { adminService } from '../../services/adminService';
+import { useToast } from '../../hooks/useToast';
 import { Loader } from '../../components/common/Loader';
 import {
   Users,
@@ -21,6 +22,7 @@ export const AdminUsersPage = () => {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
   const [actionUserId, setActionUserId] = useState(null);
+  const toast = useToast();
 
   const fetchUsers = async () => {
     try {
@@ -37,6 +39,7 @@ export const AdminUsersPage = () => {
       }
     } catch (err) {
       console.error('Failed to load users:', err);
+      toast.error('Failed to load user list.');
     } finally {
       setLoading(false);
     }
@@ -54,9 +57,11 @@ export const AdminUsersPage = () => {
         setUsers((prev) =>
           prev.map((u) => (u._id === user._id ? { ...u, isSuspended: res.isSuspended } : u))
         );
+        toast.success(`User ${user.username} ${res.isSuspended ? 'suspended' : 'reactivated'} successfully.`);
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to update user status');
+      const msg = err.response?.data?.message || 'Failed to update user status';
+      toast.error(msg);
     } finally {
       setActionUserId(null);
     }

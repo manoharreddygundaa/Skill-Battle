@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { adminService } from '../../services/adminService';
+import { useToast } from '../../hooks/useToast';
 import { DifficultyBadge } from '../../components/common/DifficultyBadge';
 import { Loader } from '../../components/common/Loader';
 import {
@@ -22,6 +23,7 @@ export const AdminProblemsPage = () => {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const toast = useToast();
 
   const fetchProblems = async () => {
     try {
@@ -53,9 +55,11 @@ export const AdminProblemsPage = () => {
       if (res.success) {
         setProblems((prev) => prev.filter((p) => p._id !== id));
         setDeleteConfirmId(null);
+        toast.success('Problem deleted successfully.');
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to delete problem');
+      const msg = err.response?.data?.message || 'Failed to delete problem';
+      toast.error(msg);
     }
   };
 

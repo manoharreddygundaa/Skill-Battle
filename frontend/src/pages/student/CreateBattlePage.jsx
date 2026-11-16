@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { battleService } from '../../services/battleService';
+import { useToast } from '../../hooks/useToast';
 import { Swords, Clock, Target, ArrowRight, Sparkles, AlertCircle } from 'lucide-react';
 
 export const CreateBattlePage = () => {
@@ -10,18 +11,23 @@ export const CreateBattlePage = () => {
   const [error, setError] = useState('');
 
   const navigate = useNavigate();
+  const toast = useToast();
 
   const handleCreateRoom = async (e) => {
     e.preventDefault();
+    if (isLoading) return;
     try {
       setIsLoading(true);
       setError('');
       const res = await battleService.createBattleRoom({ difficulty, duration });
       if (res.success && res.roomCode) {
+        toast.success(`Room ${res.roomCode} created! Share the code with your friend.`);
         navigate(`/battle/${res.roomCode}`);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to create battle room');
+      const msg = err.response?.data?.message || 'Failed to create battle room';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
